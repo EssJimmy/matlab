@@ -98,9 +98,11 @@ J_vc_aux = J_vsigma(:, 2);
 
 for i = 3:num+1
     for j = i-1:-1:1
-        J_vc_aux = [J_vc_aux (J_vsigma(:, j) + J_vsigma(:, i))];
+        J_vc_aux = [J_vc_aux (J_vsigma(:, j) + J_vsigma(:, i)/num)];
     end
 end
+
+disp(J_vc_aux)
 
 J_vc = J_vc_aux(:, 1);
 for i = 1:num
