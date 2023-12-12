@@ -3,9 +3,9 @@ clear; clc;
 % Numero de joints del robot
 num = 2; %cambiar este numero segun joints del robot
 
-syms q1 q2 q3
+syms q1 q2
 syms l1 l2
-syms Ix Iy Iz
+syms g
 
 pq = [q1 q2];
 
@@ -24,7 +24,6 @@ J_w = sym("x", [3 num]);
 I = sym("I", [1 num]);
 m = sym("m", [1 num]);
 qd = sym("qd", [1 num]);
-gP = sym("gP", [1 num]);
 
 J_vsigma= sym('x', [3 num]);
 
@@ -94,7 +93,7 @@ for i = 1:num
 end
 
 J_vsigma = [[0; 0; 0;] J_vsigma];
-J_vc_aux = J_vsigma(:, 2);
+J_vc_aux = J_vsigma(:, 2)/num;
 
 for i = 3:num+1
     for j = i-1:-1:1
@@ -102,7 +101,6 @@ for i = 3:num+1
     end
 end
 
-disp(J_vc_aux)
 
 J_vc = J_vc_aux(:, 1);
 for i = 1:num
@@ -142,7 +140,6 @@ for i = 1:(num-1)
 end
 
 D = simplify(D);
-disp(D)
 
 coriolis = sym('x', [num num]);
 
@@ -160,16 +157,29 @@ for k = 1:num
 end
 
 coriolis = simplify(coriolis);
-disp(coriolis)
 
 %% Energia potencial
-p = 0;
-for i = 1:num
-    p = p + 9.81*q(1)*m(i);
+p = m(1)*g*-(J_vc_aux(1, 1));
+for i = 1:num-1
+    p = p + m(i+1)*g*-(J_vc_aux(1, i*num));
 end
 
+gP = sym('x', [1 num]);
 for i = 1:num
-    gP(i) = simplify(diff(p, q(i)));
+    gP(i) = diff(p, pq(i));
 end
+disp(p)
+disp(gP)
 
-p = simplify(p);
+%% Tau
+Kp = sym('Kp', [num num]);
+Kd = sym('Kd', [num num]);
+dq = sym('qd', [num 1]);
+
+tildeq = pq' - dq;
+
+tau = -Kp*tildeq - Kd*(qd).' + gP;
+
+ddq = D\(tau - coriolis*(qd).' -gP);
+
+y = [ddq; tau; gP];
