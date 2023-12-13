@@ -1,7 +1,4 @@
-clear; clc;
-
-% Numero de joints del robot
-num = 2; %cambiar este numero segun joints del robot
+num = 2;
 
 syms q1 q2
 syms l1 l2
@@ -15,20 +12,21 @@ d = [0 0];
 a = [l1 l2];
 
 Rk0 = 1;
-z = sym('z', [3 num]);
+z = sym('z', [3 num + 1]);
 sigma = sym('sigma', [3 num+1]);
 
 J = sym('j', [6 num]);
 J_v = sym("x", [3 num]);
 J_w = sym("x", [3 num]);
-I = sym("I", [1 num]);
+Ix = sym("Ix", [1 num]);
+Iy = sym("Iy", [1 num]);
+Iz = sym("Iz", [1 num]);
 m = sym("m", [1 num]);
 qd = sym("qd", [1 num]);
 
 J_vsigma= sym('x', [3 num]);
 
-%% Rotaciones
-
+%%
 for n = 1:num
     Rn = [cos(q(n)) -sin(q(n))*cos(alpha(n)) sin(q(n))*sin(alpha(n)) a(n)*cos(q(n));
          sin(q(n)) cos(q(n))*cos(alpha(n)) -cos(q(n))*sin(alpha(n)) a(n)*sin(q(n));
@@ -53,20 +51,19 @@ for n = 1:num
     
     for i = 1:3
         sigma(i, n+1) = Rk0(i, 4);
-        z(i, n) = Rk0(i, 3);
+        z(i, n+1) = Rk0(i, 3);
     end
 end
 
+z(1:3, 1) = [0 0 1]';
 sigma(1:3, 1) = [0 0 1]';
-% disp(Rk0)
+disp(Rk0)
 
-%% Jacobianos
-inputArray = 'a'*num;
+%%
+inputArray = ['R', 'R'];
 
 for i = 1:num
-    inp = input('Joint revoluta o prismatica: R/P', 's');
-    inputArray(i) = inp;
-    switch inp
+    switch inputArray(i)
          case 'P'
             for j = 1:3
                 J_v(j, i) = z(j, i);
@@ -101,18 +98,27 @@ for i = 3:num+1
     end
 end
 
+J_wc_aux = J_w(:, 1);
+for i = 2:num
+    J_wc_aux = [J_wc_aux J_w(:, 1:i)];
+end
+
 
 J_vc = J_vc_aux(:, 1);
+J_wc = J_wc_aux(:, 1);
 for i = 1:num
     for j = i:i+i-1
         J_vc = [J_vc J_vc_aux(:, j)];
+        J_wc = [J_wc J_wc_aux(:, j)];
     end
 
     for k = 1:num-i
         J_vc = [J_vc [0; 0; 0]];
+        J_wc = [J_wc [0; 0; 0]];
     end
 end
 
+J_wc = J_wc(:, 2:num^2+1);
 J_vc = J_vc(:, 2:num^2+1);
 
 for i = 1:num
@@ -132,14 +138,52 @@ for i = 1:num
     end
 end
 
-%% Matriz de inercias y Coriolis
+disp(J_w)
+disp(J_v)
+disp(J)
 
-D = m(1).*(J_vc(:, 1:num)).'*J_vc(:, 1:num);
+%%
+M = m(1).*(J_vc(:, 1:num)).'*J_vc(:, 1:num);
 for i = 1:(num-1)
-    D = D + m(i+1).*(J_vc(:, (i*num)+1:(i+1)*num)).'*J_vc(:, (i*num)+1:(i+1)*num); %% Falta sumar inercias
+    M = M + m(i+1).*(J_vc(:, (i*num)+1:(i+1)*num)).'*J_vc(:, (i*num)+1:(i+1)*num);
 end
 
-D = simplify(D);
+for n = 1:num
+    Rn = [cos(q(n)) -sin(q(n))*cos(alpha(n)) sin(q(n))*sin(alpha(n)) a(n)*cos(q(n));
+         sin(q(n)) cos(q(n))*cos(alpha(n)) -cos(q(n))*sin(alpha(n)) a(n)*sin(q(n));
+         0 sin(alpha(n)) cos(alpha(n)) d(n);
+         0 0 0 1];
+    
+    for i = 1:3
+        for j = 1:3
+            coef =  coeffs(Rn(i, j));
+            if ~isempty(coef)
+                if coef > -0.5 && coef < 0.5
+                    Rn(i, j) = 0;
+                else
+                    Rn(i,j) = Rn(i,j)/abs(coef);
+                end
+            end
+        end
+    end
+    
+    Rk0 = Rk0*simplify(Rn);
+    Rk0 = simplify(Rk0);
+    
+    Ri = Rk0(1:3, 1:3);
+    I_aux = diag([Ix(n) Iy(n) Iz(n)]);
+    if n == 1
+        I = (J_wc(:,1:num)).'*(Ri).'*I_aux*Ri*J_wc(:, 1:num);
+    else
+        I = I + (J_wc(:,((n-1)*num)+1:(n)*num)).'*(Ri).'*I_aux*Ri*J_wc(:, ((n-1)*num)+1:(n)*num);
+    end
+    
+end
+
+M = simplify(M);
+I = simplify(I);
+D = M + I;
+disp(D)
 
 coriolis = sym('x', [num num]);
 
@@ -149,7 +193,9 @@ for k = 1:num
             if i == 1
                 coriolis(k, j) = (1/2)*(diff(D(k, j),pq(i)) + diff(D(k, i), pq(j)) - diff(D(i,j), pq(k))) * qd(i);
             else
-                coriolis(k, j) = coriolis(k, j) + (1/2)*(diff(D(k, j),pq(i)) + diff(D(k, i), pq(j)) - diff(D(i,j), pq(k))) * qd(i);
+                coriolis(k, j) = coriolis(k, j) + ...
+                (1/2)*(diff(D(k, j),pq(i)) + diff(D(k, i), pq(j)) ...
+                - diff(D(i,j), pq(k))) * qd(i);
             end
         end
         coriolis(k, j) = simplify(coriolis(k, j));
@@ -157,8 +203,9 @@ for k = 1:num
 end
 
 coriolis = simplify(coriolis);
+disp(coriolis)
 
-%% Energia potencial
+%%
 p = m(1)*g*-(J_vc_aux(1, 1));
 for i = 1:num-1
     p = p + m(i+1)*g*-(J_vc_aux(1, i*num));
@@ -171,7 +218,12 @@ end
 disp(p)
 disp(gP)
 
-%% Tau
+qdt = qd.';
+k = (1/2)*(qd*D*qdt);
+k = simplify(k);
+disp(k)
+
+%%
 Kp = sym('Kp', [num num]);
 Kd = sym('Kd', [num num]);
 dq = sym('qd', [num 1]);
